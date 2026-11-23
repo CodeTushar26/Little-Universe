@@ -6,6 +6,7 @@
 <title>Little Universe — Birthday Gifts</title>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 :root{
   --bg:#0B0B10; --surf1:#15151D; --surf2:#20202A;
@@ -228,6 +229,25 @@ textarea{min-height:100px;resize:vertical}
 .env-heart{position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);font-size:34px;z-index:3}
 .lettercard{background:#fffaf5;color:#2a1e3d;border-radius:14px;padding:22px 24px;max-width:520px;width:100%;text-align:left;box-shadow:0 20px 50px rgba(0,0,0,.5);animation:fadeSlideIn .6s both}
 @media (prefers-reduced-motion: reduce){.balloon,.cstar,.flame,.envelope{animation:none}.cbal{display:none}}
+
+/* ===== dashboard v2 ===== */
+.statrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:34px}
+.statcard{padding:18px 20px}
+.statnum{font-family:var(--serif);font-size:38px;line-height:1}
+.sec-h{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0 6px}
+.sec-h h2{font-family:var(--serif);font-size:28px;margin:0}
+.tplrow{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px;margin:14px 0 40px}
+.tplcard{position:relative;overflow:hidden;padding:18px;border-radius:16px;border:1px solid var(--border);cursor:pointer;min-height:150px;display:flex;flex-direction:column;justify-content:flex-end;transition:transform .3s cubic-bezier(.2,.8,.2,1),box-shadow .3s}
+.tplcard:hover{transform:translateY(-4px);box-shadow:0 16px 34px rgba(0,0,0,.35)}
+.tplcard:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.tplcard .tem{font-size:30px;position:absolute;top:14px;left:16px}
+.tplcard h3{font-family:var(--serif);font-size:21px;margin:0 0 2px}
+.pillrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.pill{padding:7px 14px;border-radius:999px;background:var(--surf2);border:1px solid var(--border);font-size:13px;color:var(--muted)}
+.pill.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+.authnote{padding:12px 14px;border-radius:12px;font-size:14px;line-height:1.5;margin:-8px 0 18px}
+.authnote.ok{background:rgba(80,200,140,.12);border:1px solid rgba(80,200,140,.35);color:#9be8c0}
+.authnote.bad{background:rgba(255,143,163,.1);border:1px solid rgba(255,143,163,.35);color:#ff8fa3}
 @media(max-width:880px){
   .editor-body{flex-direction:column;overflow-y:auto;height:auto}
   .editor-left{padding:20px;flex:none}
@@ -294,6 +314,10 @@ try{
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }catch(e){ showBootError(e); }
 const MEDIA_BUCKET = 'gift-media';
+/* Optional: paste your Google OAuth Client ID here (the public one that ends in .apps.googleusercontent.com).
+   With it, Google sign-in opens as a popup that shows your own site instead of the supabase.co address.
+   Leave empty to keep the old redirect sign-in. */
+const GOOGLE_CLIENT_ID = '';
 
 function uid(){return Math.random().toString(36).slice(2,10)+Date.now().toString(36)}
 function emptyGift(){
@@ -313,7 +337,7 @@ function rowToGift(row, photoRows){
     photos:(photoRows||[]).slice().sort((a,b)=>a.sort_order-b.sort_order).map(p=>({id:p.id,src:p.url,path:p.path||'',caption:p.caption||''})),
     music:row.music_url||'', musicFile:row.music_file_url||'', musicPath:row.music_path||'',
     bgIntensity:row.bg_intensity||'balanced', published:!!row.published, views:row.views||0,
-    revealAt:row.reveal_at||'', revealTz:row.reveal_tz||'', lockMessage:row.lock_message||'', extras:row.extras||{},
+    revealAt:row.reveal_at||'', revealTz:row.reveal_tz||'', lockMessage:row.lock_message||'', extras:row.extras||{}, isTemplate:!!row.is_template, templateLabel:row.template_label||'', hasPin:!!row.pin_hash,
     createdAt:new Date(row.created_at).getTime(), updatedAt:new Date(row.updated_at).getTime()
   };
 }
@@ -323,7 +347,8 @@ function giftToRow(g){
     messages:g.messages, little:g.little, music_url:g.music, music_file_url:g.musicFile,
     music_path:g.musicPath||null, bg_intensity:g.bgIntensity, published:g.published,
     reveal_at:g.revealAt||null, reveal_tz:g.revealTz||null, lock_message:g.lockMessage||null,
-    ...((g.extras && Object.keys(g.extras).length) ? { extras:g.extras } : {})
+    ...((g.extras && Object.keys(g.extras).length) ? { extras:g.extras } : {}),
+    ...(g.isTemplate ? { is_template:true, template_label:g.templateLabel||null } : {})
   };
 }
 
@@ -344,7 +369,7 @@ function currentUser(){
 function requireAuth(){ if(!currentUser()){ state.view='login'; } }
 
 function nav(view, extra){
-  state = {...state, view, ...extra};
+  state = {...state, notice:null, view, ...extra};
   if(view==='dashboard') fetchMyGifts();
   if(view==='editor' && state.giftId) loadGift(state.giftId);
   render();
@@ -404,7 +429,7 @@ function navbar(active){
       ${u ? `
         <button class="btn btn-ghost" style="padding:8px 16px" onclick="nav('dashboard')">My Gifts</button>
         <div style="position:relative">
-          <div class="avatar" style="cursor:pointer" onclick="toggleMenu()">${(u.name||'U')[0].toUpperCase()}</div>
+          <div class="avatar" style="cursor:pointer" onclick="toggleMenu()">${((String(u.name||'U').split(/\s+/).find(w=>/^\p{L}/u.test(w))||'U')[0]).toUpperCase()}</div>
           ${state.menuOpen?`<div class="menu">
             <button onclick="nav('profile')">Profile</button>
             <button onclick="nav('dashboard')">My Gifts</button>
@@ -471,6 +496,7 @@ function authView(mode){
   return navbar()+`<div class="authwrap"><div class="authcard card">
     <h1>${isLogin? 'Welcome back.' : 'Create your little universe.'}</h1>
     <p class="muted" style="margin-bottom:26px">${isLogin? 'Your memories are waiting.' : 'It takes two minutes.'}</p>
+    ${(isLogin && state.notice) ? `<div class="authnote ${state.notice.ok?'ok':'bad'}" role="status">${esc(state.notice.text)}</div>` : ''}
     <form id="authform">
       ${isLogin?'':`<div class="field"><label>Name</label><input id="af_name" required></div>`}
       <div class="field"><label>Email</label><input id="af_email" type="email" required></div>
@@ -479,7 +505,7 @@ function authView(mode){
       <p class="muted" style="font-size:12px;margin-top:-8px">At least 6 characters.</p>`}
       <div id="af_err" class="err"></div>
       <button class="btn btn-primary" style="width:100%;margin-top:8px" type="submit">${isLogin?'Log In':'Create Account'}</button>
-      <button type="button" class="btn btn-ghost" style="width:100%;margin-top:10px" onclick="loginWithGoogle()">Continue with Google</button>
+      ${GOOGLE_CLIENT_ID ? `<div id="gsiBtn" style="margin-top:10px;display:flex;justify-content:center;min-height:44px"></div>` : `<button type="button" class="btn btn-ghost" style="width:100%;margin-top:10px" onclick="loginWithGoogle()">Continue with Google</button>`}
     </form>
     <div style="margin-top:18px;text-align:center;font-size:13px" class="muted">
       ${isLogin? `<a href="#" onclick="nav('signup');return false">Create an account</a>` : `<a href="#" onclick="nav('login');return false">Already have an account? Log in</a>`}
@@ -488,22 +514,46 @@ function authView(mode){
 }
 
 /* ---------- DASHBOARD ---------- */
+let dashFilter = 'all', dashQuery = '';
+function giftGridHtml(){
+  const mine = giftsCache.filter(g=>!g.isTemplate);
+  let list = mine;
+  if(dashFilter==='draft') list = list.filter(g=>!g.published);
+  if(dashFilter==='live') list = list.filter(g=>g.published);
+  const q = dashQuery.trim().toLowerCase();
+  if(q) list = list.filter(g=>(g.name||'').toLowerCase().includes(q));
+  if(!list.length) return `<div class="empty card" style="grid-column:1/-1;padding:44px 20px"><p class="muted" style="margin:0">${mine.length ? 'No gifts match this filter.' : 'No gifts yet. Pick a template above to start in seconds.'}</p></div>`;
+  return list.map(giftCard).join('');
+}
+function refreshGrid(){ const el = document.getElementById('giftGrid'); if(el) el.innerHTML = giftGridHtml(); }
+function setDashFilter(f){ dashFilter = f; render(); }
+function statsHtml(mine){
+  const pub = mine.filter(g=>g.published).length, views = mine.reduce((a,g)=>a+(g.views||0),0);
+  const unread = Object.values(replyUnread||{}).reduce((a,b)=>a+b,0);
+  const c = (n,l,e)=>`<div class="statcard card"><div class="statnum">${n}</div><div class="muted" style="font-size:13px;margin-top:4px">${e} ${l}</div></div>`;
+  return `<div class="statrow">${c(mine.length,'Gifts','🎁')}${c(pub,'Published','🚀')}${c(views,'Views','👀')}${c(unread,'New replies','💌')}</div>`;
+}
 function dashboardView(){
-  const gifts = giftsCache;
+  const mine = giftsCache.filter(g=>!g.isTemplate), tpls = giftsCache.filter(g=>g.isTemplate);
+  const pill = (k,l)=>`<button class="pill ${dashFilter===k?'sel':''}" onclick="setDashFilter('${k}')">${l}</button>`;
+  const builtin = TEMPLATES.map(t=>{ const th = THEMES[t.theme]; return `<div class="tplcard" role="button" tabindex="0" onclick="openUseTemplate('b','${t.id}')" onkeydown="if(event.key==='Enter')openUseTemplate('b','${t.id}')" style="background:linear-gradient(160deg,${th.c1}55,${th.c2}22),var(--surf1)"><div class="tem">${t.emoji}</div><h3>${t.label}</h3><div class="muted" style="font-size:12px;line-height:1.4">${t.desc}</div></div>`; }).join('');
+  const blank = `<div class="tplcard" role="button" tabindex="0" onclick="createGift()" onkeydown="if(event.key==='Enter')createGift()" style="border-style:dashed;align-items:center;justify-content:center;text-align:center"><div style="font-size:30px">＋</div><h3>Blank gift</h3><div class="muted" style="font-size:12px">Start from scratch</div></div>`;
+  const mineT = tpls.map(g=>{ const th = THEMES[g.theme] || THEMES.birthday; return `<div class="tplcard" style="cursor:default;background:linear-gradient(160deg,${th.c1}55,${th.c2}22),var(--surf1)"><div class="tem">⭐</div><h3>${esc(g.templateLabel||'My template')}</h3><div class="giftactions"><button onclick="openUseTemplate('u','${g.id}')">Use</button><button onclick="nav('editor',{giftId:'${g.id}',editorStep:1})">Edit</button><button onclick="deleteGift('${g.id}')" style="color:#ff8fa3">Delete</button></div></div>`; }).join('');
   return navbar()+`<div class="wrap">
     <div class="dash-head">
       <div><h1 class="serif" style="font-size:38px;margin:0">Your little universes</h1><p class="muted">Create something they'll never forget.</p></div>
       <button class="btn btn-primary" onclick="createGift()">+ Create New Gift</button>
     </div>
-    ${giftsLoading? `<div class="empty card"><p class="muted">Gathering the memories…</p></div>` :
-      gifts.length===0? `
-      <div class="empty card">
-        <h2 class="serif">You haven't created a gift yet.</h2>
-        <p class="muted">Someone is waiting for something unforgettable.</p>
-        <button class="btn btn-primary" onclick="createGift()">Create Your First Gift</button>
-      </div>` :
-      `<div class="giftgrid">${gifts.map(giftCard).join('')}</div>`
-    }
+    ${giftsLoading ? `<div class="empty card"><p class="muted">Gathering the memories…</p></div>` : `
+    ${statsHtml(mine)}
+    <div class="sec-h"><h2>✨ Start from a template</h2></div>
+    <p class="muted" style="margin:0;font-size:14px">Pick one, type the recipient's name, and every {name} in it is filled in. Then change any word you like.</p>
+    <div class="tplrow">${builtin}${blank}</div>
+    ${tpls.length ? `<div class="sec-h"><h2>⭐ My templates</h2></div><p class="muted" style="margin:0;font-size:14px">Your own reusable gifts. Make one with “Save as template” on any gift.</p><div class="tplrow">${mineT}</div>` : ''}
+    <div class="sec-h"><h2>Your gifts</h2>
+      <div class="pillrow">${pill('all','All')}${pill('draft','Drafts')}${pill('live','Published')}<input placeholder="Search by name…" value="${esc(dashQuery)}" oninput="dashQuery=this.value;refreshGrid()" style="width:180px;padding:8px 12px;font-size:13px;border-radius:999px"></div>
+    </div>
+    <div class="giftgrid" id="giftGrid" style="margin-top:16px">${giftGridHtml()}</div>`}
   </div>${footer()}`;
 }
 function timeAgo(ts){ const m=Math.floor((Date.now()-ts)/60000); if(m<1)return 'just now'; if(m<60)return m+'m ago'; const h=Math.floor(m/60); if(h<24)return h+'h ago'; return Math.floor(h/24)+'d ago'; }
@@ -523,6 +573,7 @@ function giftCard(g){
         <button onclick="shareGift('${g.id}')">Share</button>
         <button onclick="openReplies('${g.id}')">💌 Replies${replyUnread[g.id]?' ('+replyUnread[g.id]+' new)':''}</button>
         <button onclick="duplicateGift('${g.id}')">Duplicate</button>
+        <button onclick="saveAsTemplate('${g.id}')">⭐ Save as template</button>
         <button onclick="deleteGift('${g.id}')" style="color:#ff8fa3">Delete</button>
       </div>
     </div>
@@ -537,16 +588,9 @@ async function createGift(){
   nav('editor',{giftId:data.id,editorStep:0});
 }
 async function duplicateGift(id){
-  const u=currentUser(); if(!u) return;
   const original = giftsCache.find(g=>g.id===id); if(!original) return;
-  const copy = {...original, name: original.name+' (copy)', published:false, views:0};
-  const { data, error } = await sb.from('gifts').insert({...giftToRow(copy), owner_id:u.id}).select().single();
-  if(error){ alert('Could not duplicate: '+error.message); return; }
-  if(original.photos.length){
-    const rows = original.photos.map((p,i)=>({gift_id:data.id, url:p.src, path:p.path||null, caption:p.caption||'', sort_order:i}));
-    await sb.from('gift_photos').insert(rows);
-  }
-  fetchMyGifts();
+  try{ await cloneGift(original, { name: original.name+' (copy)' }); fetchMyGifts(); }
+  catch(e){ alert('Could not duplicate: '+(e.message||e)); }
 }
 let pendingDelete=null;
 function deleteGift(id){ pendingDelete=id; showModal(`
@@ -567,7 +611,7 @@ async function confirmDelete(){
 async function shareGift(id){
   const g = (currentGift && currentGift.id===id) ? currentGift : (giftsCache.find(x=>x.id===id) || currentGift);
   if(!g) return;
-  const link = location.origin+location.pathname+'#gift='+id;
+  const link = ((g.extras||{}).style==='secret') ? secretUrl(id) : location.origin+location.pathname+'#gift='+id;
   if(!g.published){
     showModal(`<h3>Publishing…</h3><p class="muted">One moment.</p>`);
     const { error } = await sb.from('gifts').update({ published:true }).eq('id', id);
@@ -680,7 +724,8 @@ function editorStepBody(g, step){
       <div class="themecard ${g.theme===k?'sel':''}" onclick="updateField('theme','${k}')">
         <div class="sw" style="background:linear-gradient(135deg,${t.c1},${t.c2})"></div>${t.label}
       </div>`).join('')}</div>
-    ${extrasPanel(g)}
+    ${stylePanel(g)}
+    ${(g.extras||{}).style==='secret' ? '' : extrasPanel(g)}
     ${nav_}`;
 
   if(step===5) return stepNav+`
@@ -897,6 +942,7 @@ function publishAndShare(){ if(currentGift) shareGift(currentGift.id); }
 function openRecipient(id, opts){
   const g = (currentGift && currentGift.id===id) ? currentGift : (giftsCache.find(x=>x.id===id) || currentGift);
   if(!g) return;
+  if((g.extras||{}).style==='secret'){ window.open(secretUrl(id), '_blank'); return; }
   const el = document.createElement('div');
   el.id='recipient';
   document.body.appendChild(el);
@@ -1133,7 +1179,7 @@ function burstParticles(root, color, big){
 /* ---------- AUTH ACTIONS ---------- */
 async function doLogin(email,pw){
   const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
-  if(error) return error.message;
+  if(error) return /not confirmed/i.test(error.message) ? 'Please verify your email first. Check your inbox for our verification link.' : error.message;
   session = data.session;
   nav('dashboard');
   return null;
@@ -1141,10 +1187,10 @@ async function doLogin(email,pw){
 async function doSignup(name,email,pw,pw2){
   if(pw!==pw2) return "Passwords don't match.";
   if(pw.length<6) return 'Password must be at least 6 characters.';
-  const { data, error } = await sb.auth.signUp({ email, password: pw, options: { data: { name } } });
+  const { data, error } = await sb.auth.signUp({ email, password: pw, options: { data: { name }, emailRedirectTo: location.origin + location.pathname + '?verified=1' } });
   if(error) return error.message;
   session = data.session;
-  if(!session) return 'Account created — check your inbox to confirm your email, then log in.';
+  if(!session) return 'Account created! We sent a verification link to your email. Click it, then come back and log in.';
   nav('dashboard');
   return null;
 }
@@ -1160,6 +1206,7 @@ function toggleMenu(){ state.menuOpen=!state.menuOpen; render(); }
 
 /* ---------- EVENT WIRING ---------- */
 function wireEvents(){
+  initGoogleButton();
   const form = document.getElementById('authform');
   if(form){
     form.onsubmit = async (e)=>{
@@ -1630,6 +1677,193 @@ window.__revealSecret = ()=>{
   sfx('chime'); const r = t.getBoundingClientRect(); floatHearts(r.left + r.width/2, r.top + r.height/2, 12);
 };
 
+/* ===================== TEMPLATES ===================== */
+const TEMPLATES = [
+ {id:'bestfriend', emoji:'🤝', label:'Best Friend Birthday', desc:'Warm, funny and full of shared memories.', theme:'bestfriend', occasion:'birthday',
+  messages:{main:"Happy birthday, {name}! 🎉\n\nSome people make life better just by being in it, and you are one of them. Thank you for the laughs, the late-night talks and for always showing up. I hope this year gives you everything you deserve.", love:"I love how you make anyone feel at home, how you show up when it matters, and how you turn an ordinary day into a story worth telling.", story:"We never planned to get this close, but somehow every little moment added up. Here's to every adventure so far and the ones still waiting.", dreams:"I can't wait for more trips, more inside jokes and more years of being your friend. Whatever you dream of, I'll be cheering the loudest."},
+  extras:{cosmic:true,sfx:true,balloons:true,cake:true,letter:true,reasons:true,gallery:true,secret:true, wish:"May every wish you make come true 💗", reasonsText:"You make ordinary days feel special\nYou are the first person I want to tell good news\nYou make me laugh like no one else", secretTeaser:"There's one more thing I want you to know…", secretText:"I'm really lucky to have you in my life, {name}."}},
+ {id:'sibling', emoji:'🧸', label:'Sibling Birthday', desc:'Teasing on the outside, love on the inside.', theme:'friendship', occasion:'birthday',
+  messages:{main:"Happy birthday, {name}! 🎂\n\nWe fight, we tease, we steal each other's things, but you will always be my person. I'm proud of who you are and I'm always on your side.", love:"I love that you know me better than anyone, and that no matter what happens, I can count on you.", story:"From childhood chaos to everything we've grown through, you've been there for all of it. That's something no one else can replace.", dreams:"I hope we keep making memories, keep annoying each other lovingly, and keep being each other's biggest fans."},
+  extras:{cosmic:true,balloons:true,cake:true,letter:true,reasons:true,secret:true, wish:"Hope this year is your best one yet 🎈", reasonsText:"You always have my back\nYou make home feel like home\nYou're the only one who gets my jokes", secretText:"Thank you for being the best sibling ever, {name}."}},
+ {id:'love', emoji:'💞', label:'Romantic Birthday', desc:'A soft, heartfelt love letter in gift form.', theme:'loveletter', occasion:'birthday',
+  messages:{main:"Happy birthday, {name}. 💌\n\nEvery version of my day gets better when you are in it. I made this little universe just for you, to say what I don't say often enough: I love you, and I'm so grateful for you.", love:"I love your smile, your kindness, and the way you make everything feel softer and safer.", story:"Our story is my favorite one. I still smile when I think about how it began and how far we've come.", dreams:"I dream of more mornings, more adventures and more years beside you. Wherever life goes, I want to go there with you."},
+  extras:{cosmic:true,sfx:true,balloons:true,cake:true,letter:true,reasons:true,gallery:true,secret:true, wish:"May all your dreams come true, my love 💗", reasonsText:"You make my world brighter\nYou make me want to be better\nHome is wherever you are", secretTeaser:"There's a little secret I've been keeping…", secretText:"I love you more than I know how to say, {name}."}},
+ {id:'parent', emoji:'🌷', label:'For Mom or Dad', desc:'A thankful, gentle message for your parent.', theme:'memories', occasion:'birthday',
+  messages:{main:"Happy birthday, {name}! 🌷\n\nThank you for every sacrifice, every piece of advice and every time you believed in me before I did. Today is all about you.", love:"I love your strength, your patience, and the way you care without ever asking for anything in return.", story:"So much of who I am comes from you. Every memory with you is something I treasure.", dreams:"I hope this year brings you rest, joy and everything you've always wished for. I'll keep making you proud."},
+  extras:{cosmic:true,balloons:true,cake:true,letter:true,reasons:true,secret:true, wish:"May you always be healthy and happy 🌷", reasonsText:"You taught me what love looks like\nYou are my first and forever hero\nYou make every place feel like home", secretText:"Thank you for everything. I love you, {name}."}},
+ {id:'funny', emoji:'🎉', label:'Funny and Chaotic', desc:'Playful roasts with a soft ending.', theme:'birthday', occasion:'birthday',
+  messages:{main:"HAPPY BIRTHDAY, {name}!! 🎉\n\nCongratulations on surviving another year with zero chill and maximum chaos. I'm told this is called growing up, but we both know that's a myth.", love:"I love that you're always late but somehow still the most fun person in the room.", story:"Our story is mostly bad decisions and good laughs, and honestly I wouldn't change a thing.", dreams:"More trips, more nonsense, more snacks and more years of being a bad influence on each other."},
+  extras:{cosmic:true,sfx:true,balloons:true,cake:true,letter:false,reasons:true,secret:true, wish:"May your Wi-Fi be fast and your cake be big 🎂", reasonsText:"You make boring days hilarious\nYou always know the best snacks\nYou're weird in the best possible way", secretTeaser:"Okay, serious for one second…", secretText:"You're one of the best things that ever happened to me, {name}."}},
+ {id:'anniversary', emoji:'💍', label:'Anniversary', desc:'Celebrate your story together.', theme:'soulmate', occasion:'anniversary',
+  messages:{main:"Happy anniversary, {name}. 💞\n\nThank you for every moment we've shared. Being with you feels like home, and I'd choose you again every single time.", love:"I love how we laugh, how we grow, and how we've turned plain days into our favorite memories.", story:"From the very beginning to today, every chapter with you has been my favorite.", dreams:"Here's to more adventures, more quiet evenings and a lifetime of us."},
+  extras:{cosmic:true,sfx:true,balloons:true,letter:true,reasons:true,gallery:true,secret:true, reasonsText:"You are my best friend\nYou make every day better\nI'd choose you again and again", secretText:"Happy anniversary. I love you, {name}."}},
+ {id:'secretmidnight', emoji:'🎬', label:'Secret Midnight Gift', desc:'Curtains, an optional PIN lock and three mystery boxes.', theme:'midnight', occasion:'birthday',
+  messages:{main:"Happy birthday, {name}! 🎉\n\nI made something just for you. I hope it makes you smile as much as you make me smile.", love:"I love how you make every moment feel special, and how easy you are to love.", story:"Every memory with you is one I keep close. Thank you for being part of my story.", dreams:"Here's to your dreams and everything beautiful still ahead. I'll be right here cheering for you."},
+  extras:{style:'secret', wish:"May every wish you make come true 💗"}}
+];
+function deepStr(v, fn){
+  if(typeof v === 'string') return fn(v);
+  if(Array.isArray(v)) return v.map(x=>deepStr(x, fn));
+  if(v && typeof v === 'object'){ const o = {}; Object.keys(v).forEach(k=>{ o[k] = deepStr(v[k], fn); }); return o; }
+  return v;
+}
+/* returns a function that swaps a person's name (full or first name) for {name} */
+function swapNameFn(fullName){
+  const full = (fullName||'').trim(), first = full.split(/\s+/)[0];
+  const names = [full, first].filter((n,i,a)=>n.length >= 2 && a.indexOf(n) === i).sort((x,y)=>y.length-x.length);
+  const esc_ = n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return (str)=>{ let out = str; names.forEach(n=>{ out = out.replace(new RegExp('(?<![\\p{L}\\p{N}])' + esc_(n) + '(?![\\p{L}\\p{N}])', 'giu'), '{name}'); }); return out; };
+}
+function tplToGift(t){
+  return Object.assign(emptyGift(), { occasion:t.occasion||'birthday', theme:t.theme,
+    messages:Object.assign({main:'',love:'',story:'',dreams:''}, t.messages),
+    little:Object.assign({nickname:'',joke:'',memory:'',habit:'',phrase:'',owe:''}, t.little||{}),
+    extras:Object.assign({}, t.extras||{}), photos:[] });
+}
+/* Copies a gift row, and copies photo FILES too so deleting one gift never breaks another */
+async function cloneGift(src, over){
+  const u = currentUser(); if(!u) throw new Error('Please log in again.');
+  const copy = Object.assign({}, src, over, { published:false, views:0, revealAt:'', musicPath:'' });
+  const { data, error } = await sb.from('gifts').insert({ ...giftToRow(copy), owner_id:u.id }).select().single();
+  if(error) throw error;
+  const photos = copy.photos || [];
+  if(photos.length){
+    const rows = [];
+    for(let i=0;i<photos.length;i++){
+      const ph = photos[i]; let url = ph.src, path = null;
+      if(ph.path){
+        const ext = (ph.path.split('.').pop() || 'jpg').slice(0,5);
+        const np = `${u.id}/${data.id}/${uid()}-copy.${ext}`;
+        const { error: ce } = await sb.storage.from(MEDIA_BUCKET).copy(ph.path, np);
+        if(!ce){ url = sb.storage.from(MEDIA_BUCKET).getPublicUrl(np).data.publicUrl; path = np; }
+      }
+      rows.push({ gift_id:data.id, url, path, caption:ph.caption||'', sort_order:i });
+    }
+    await sb.from('gift_photos').insert(rows);
+  }
+  return { id:data.id };
+}
+function getTpl(kind, id){
+  if(kind === 'b'){ const t = TEMPLATES.find(x=>x.id===id); return t ? { label:t.label, gift:tplToGift(t) } : null; }
+  const g = giftsCache.find(x=>x.id===id); return g ? { label:g.templateLabel||'My template', gift:g } : null;
+}
+let useTpl = null, tplSrc = null;
+function openUseTemplate(kind, id){
+  const t = getTpl(kind, id); if(!t) return; useTpl = { kind, id };
+  showModal(`<h3>Use “${esc(t.label)}”</h3>
+    <p class="muted">Who is this gift for? Their name replaces {name} everywhere in the template. You can edit every word afterwards.</p>
+    <input id="tplName" maxlength="150" placeholder="Recipient's name" style="margin:14px 0" onkeydown="if(event.key==='Enter')confirmUseTemplate()">
+    <div id="tplErr" class="err"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tplGo" onclick="confirmUseTemplate()">Create gift</button></div>`);
+  setTimeout(()=>{ const i = document.getElementById('tplName'); if(i) i.focus(); }, 60);
+}
+async function confirmUseTemplate(){
+  const nm = (document.getElementById('tplName').value||'').trim(), err = document.getElementById('tplErr'), btn = document.getElementById('tplGo');
+  if(!nm){ err.textContent = "Please enter the recipient's name."; return; }
+  const t = getTpl(useTpl.kind, useTpl.id); if(!t) return;
+  btn.disabled = true; btn.textContent = 'Creating…'; err.textContent = '';
+  try{
+    const fill = str => str.split('{name}').join(nm);
+    const g = t.gift;
+    const base = Object.assign({}, g, { messages:deepStr(g.messages, fill), little:deepStr(g.little, fill), extras:deepStr(g.extras||{}, fill), lockMessage:fill(g.lockMessage||'') });
+    const created = await cloneGift(base, { name:nm, isTemplate:false, templateLabel:'' });
+    closeModal(); currentGift = null; nav('editor', { giftId:created.id, editorStep:1 });
+  }catch(e){ btn.disabled = false; btn.textContent = 'Create gift'; err.textContent = (e && e.message) || 'Could not create the gift.'; }
+}
+function saveAsTemplate(id){
+  const g = giftsCache.find(x=>x.id===id); if(!g) return; tplSrc = id;
+  showModal(`<h3>Save as template</h3>
+    <p class="muted">Keep this gift's words and look as a starting point. ${esc(g.name||'The recipient')}'s name is swapped for {name}, so you can reuse it for someone else.</p>
+    <input id="tplLabel" maxlength="60" value="${esc((g.name?g.name+' - ':'')+'template')}" style="margin:14px 0">
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px" class="muted"><input type="checkbox" id="tplPhotos" style="width:auto"> Include photos and uploaded song</label>
+    <div id="tplErr" class="err"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tplGo" onclick="confirmSaveTemplate()">Save template</button></div>`);
+}
+async function confirmSaveTemplate(){
+  const g = giftsCache.find(x=>x.id===tplSrc); if(!g) return;
+  const label = (document.getElementById('tplLabel').value||'').trim() || 'My template';
+  const withMedia = document.getElementById('tplPhotos').checked;
+  const err = document.getElementById('tplErr'), btn = document.getElementById('tplGo');
+  btn.disabled = true; btn.textContent = 'Saving…'; err.textContent = '';
+  try{
+    const swap = swapNameFn(g.name);
+    const base = Object.assign({}, g, { messages:deepStr(g.messages, swap), little:deepStr(g.little, swap), extras:deepStr(g.extras||{}, swap), lockMessage:swap(g.lockMessage||''),
+      photos: withMedia ? g.photos : [], musicFile: withMedia ? g.musicFile : '', music: withMedia ? g.music : '' });
+    await cloneGift(base, { name:'', isTemplate:true, templateLabel:label });
+    closeModal(); fetchMyGifts();
+  }catch(e){
+    btn.disabled = false; btn.textContent = 'Save template';
+    err.textContent = /is_template|template_label/.test((e&&e.message)||'') ? 'Run the templates SQL in Supabase first (sql_part_D_templates.sql).' : ((e && e.message) || 'Could not save the template.');
+  }
+}
+
+/* ===================== GOOGLE BUTTON (popup, shows your own site) ===================== */
+async function sha256Hex(t){ const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join(''); }
+let __gsiRaw = '';
+async function initGoogleButton(){
+  const el = document.getElementById('gsiBtn'); if(!el || !GOOGLE_CLIENT_ID) return;
+  const fallback = ()=>{ el.innerHTML = `<button type="button" class="btn btn-ghost" style="width:100%" onclick="loginWithGoogle()">Continue with Google</button>`; };
+  let tries = 0;
+  while(!(window.google && google.accounts && google.accounts.id)){ if(++tries > 40){ fallback(); return; } await new Promise(r=>setTimeout(r,150)); }
+  try{
+    __gsiRaw = uid()+uid()+uid(); const hashed = await sha256Hex(__gsiRaw);
+    google.accounts.id.initialize({ client_id:GOOGLE_CLIENT_ID, nonce:hashed, ux_mode:'popup',
+      callback: async (resp)=>{
+        const errEl = document.getElementById('af_err');
+        const { data, error } = await sb.auth.signInWithIdToken({ provider:'google', token:resp.credential, nonce:__gsiRaw });
+        if(error){ if(errEl) errEl.textContent = error.message; return; }
+        session = data.session; nav('dashboard');
+      } });
+    google.accounts.id.renderButton(el, { theme:'filled_black', size:'large', shape:'pill', text:'continue_with', width:300 });
+  }catch(e){ fallback(); }
+}
+
+/* ===================== SECRET MIDNIGHT STYLE ===================== */
+/* Adapted from "Secret Birthday Gift" by @saklincodes (MIT). Lives on its own page: /secret/ */
+function secretUrl(id){ return new URL('secret/?gift=' + encodeURIComponent(id), location.origin + location.pathname).href; }
+function setStyle(k){
+  if(!currentGift) return;
+  currentGift.extras = Object.assign({}, currentGift.extras, { style: k === 'secret' ? 'secret' : 'classic' });
+  queueSave(currentGift); rerenderKeepScroll();
+}
+function stylePanel(g){
+  const ex = g.extras || {}, st = ex.style === 'secret' ? 'secret' : 'classic';
+  const opt = (k,e,t,d)=>`<div class="chip ${st===k?'sel':''}" role="button" tabindex="0" style="flex:1;min-width:200px;border-radius:14px;padding:14px;cursor:pointer;text-align:left;line-height:1.4" onclick="setStyle('${k}')" onkeydown="if(event.key==='Enter')setStyle('${k}')"><b>${e} ${t}</b><br><span style="font-size:12px;opacity:.85">${d}</span></div>`;
+  let more = '';
+  if(st === 'secret'){
+    more = `<div style="margin-top:16px">
+      <div class="muted" style="font-size:13px;line-height:1.6">Opens on its own page: a midnight countdown clock, red stage curtains, an optional PIN lock, a playful YES/NO question, then three mystery boxes. Box 1 is your <b>photos</b> on a clothesline (add captions on the Photos step), box 2 is a <b>birthday cake</b> with a wish, box 3 is a typewriter <b>letter</b> built from your messages. It also uses your song, reveal schedule and replies.</div>
+      <div class="label">Wish shown after the candles go out</div>
+      <input maxlength="200" placeholder="May every wish you make come true" value="${esc(ex.wish)}" oninput="setExtraText('wish',this.value)">
+      <div class="label">🔒 4-digit PIN (optional)</div>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">${g.hasPin ? 'A PIN is set. The recipient must enter it before the gift opens.' : 'No PIN: anyone with the link can open it.'}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="pinInput" type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="••••" style="width:110px;text-align:center;letter-spacing:.3em">
+        <button class="btn btn-ghost" onclick="savePin()">${g.hasPin ? 'Change PIN' : 'Set PIN'}</button>
+        ${g.hasPin ? `<button class="btn btn-ghost" onclick="removePin()" style="color:#ff8fa3">Remove PIN</button>` : ''}
+      </div>
+      <div id="pinErr" class="err"></div>
+      <div class="muted" style="font-size:12px;margin-top:8px">Tell them the PIN yourself (a special date works well). It can't be shown again here, only changed.</div>
+    </div>`;
+  }
+  return `<div class="card" style="padding:20px;margin:26px 0"><div class="label" style="margin-top:0">🎬 Gift style</div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">${opt('classic','✨','Classic journey','Scenes in your chosen theme, plus optional cute extras.')}${opt('secret','🎬','Secret midnight gift','A theatrical surprise with curtains, a PIN lock and mystery boxes.')}</div>${more}</div>`;
+}
+async function savePin(){
+  const err = document.getElementById('pinErr'), v = (document.getElementById('pinInput').value || '').trim();
+  if(err) err.textContent = '';
+  if(!currentGift) return;
+  if(!/^\d{4}$/.test(v)){ if(err) err.textContent = 'Enter exactly 4 digits.'; return; }
+  const { error } = await sb.rpc('set_gift_pin', { p_gift_id: currentGift.id, p_pin: v });
+  if(error){ if(err) err.textContent = /function|schema cache|does not exist/i.test(error.message) ? 'Run the latest SQL file in Supabase first.' : error.message; return; }
+  currentGift.hasPin = true; rerenderKeepScroll();
+}
+async function removePin(){
+  const err = document.getElementById('pinErr'); if(!currentGift) return;
+  const { error } = await sb.rpc('set_gift_pin', { p_gift_id: currentGift.id, p_pin: '' });
+  if(error){ if(err) err.textContent = error.message; return; }
+  currentGift.hasPin = false; rerenderKeepScroll();
+}
+
 /* ---------- INIT ---------- */
 async function checkPublicLink(){
   const m = location.hash.match(/^#gift=(.+)$/);
@@ -1641,6 +1875,9 @@ async function checkPublicLink(){
   if(error && /fetch|network|failed/i.test(error.message||'')){
     document.body.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:30px;background:#0B0B10;color:#F2EFEF;font-family:'Inter',sans-serif"><div><h2 style="font-family:'Cormorant Garamond',serif;font-size:28px">Couldn't reach the server.</h2><p style="color:#9b96a3">Check your connection and try again.</p><button class="btn btn-primary" onclick="location.reload()">Try again</button></div></div>`;
     return true;
+  }
+  if(pg && (pg.style==='secret' || (pg.gift && pg.gift.extras && pg.gift.extras.style==='secret') || (pg.locked && pg.pin_required && !pg.reveal_at))){
+    location.replace(secretUrl(id)); return true;
   }
   if(pg && pg.locked){ showLockedScreen(pg, id); return true; }
   const data = (pg && !pg.locked) ? pg.gift : null;
@@ -1697,11 +1934,28 @@ function playPandaIntro(lines,onDone){
     finish();
   })();
 }
+/* ---------- RETURN FROM THE EMAIL VERIFICATION LINK ---------- */
+function readVerifyReturn(){
+  const q = new URLSearchParams(location.search), h = location.hash || '';
+  if(q.get('verified') === '1' || /[#&]type=signup/.test(h)) return 'ok';
+  if(/error_code=|error=access_denied/.test(h)) return 'bad';
+  return null;
+}
+async function applyVerifyReturn(kind){
+  if(kind === 'ok'){ try{ await sb.auth.signOut(); }catch(e){} session = null; }   // they asked to log in again
+  try{ history.replaceState(null, '', location.pathname); }catch(e){}                // remove tokens from the address bar
+  state.view = 'login';
+  state.notice = kind === 'ok'
+    ? { ok:true, text:'✅ Your profile has been verified. Please log in again.' }
+    : { ok:false, text:'That verification link has expired or was already used. Log in, or sign up again to get a new link.' };
+}
 async function boot(){
   if(!sb) return;
   try{
+    const verifyReturn = readVerifyReturn();   // read first, before anything clears the URL
     const isPublic = await checkPublicLink();
     if(isPublic) return;
+    if(verifyReturn) await applyVerifyReturn(verifyReturn);
     const { data } = await sb.auth.getSession();
     session = data.session;
     sb.auth.onAuthStateChange((_event, newSession)=>{ session = newSession; render(); });
